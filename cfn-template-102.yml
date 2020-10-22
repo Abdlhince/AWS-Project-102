@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  Kittens Carousel Static Website deployed on
+  AWS Application Load Balancer with Auto Scaling Group
+  using AWS Cloudformation.
+Resources:
+  ALBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enable HTTP for ALB #required
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80  
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  WebServersSecGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enable HTTP for Web Servers #required
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt ALBSecurityGroup.GroupId
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0        
+  WebServerTG:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      VpcId: !GetAtt WebServersSecGroup.VpcId
+  ALB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !GetAtt ALBSecurityGroup.GroupId
+      Subnets:
+        - subnet-04f02d62
+        - subnet-28835809
+        - subnet-8f069181 
+        - subnet-98d7bad5
+        - subnet-a57aa4fa
+        - subnet-c99e7ef8
+      Type: application
+  ALBListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions: #required
+        - TargetGroupArn: !Ref WebServerTG
+          Type: forward
+      LoadBalancerArn: !Ref ALB #required
+      Port: 80 #required
+      Protocol: HTTP #required
+  WebServerLT:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateData:
+        ImageId: ami-02354e95b39ca8dec
+        InstanceType: t2.micro
+        KeyName: abdullah test
+        SecurityGroupIds:
+          - !GetAtt WebServersSecGroup.GroupId
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+             - Key: Name
+               Value: !Sub Web Server of ${AWS::StackName}
+        UserData:
+          Fn::Base64:  |
+              #! /bin/bash
+              yum update -y
+              yum install httpd -y
+              FOLDER="https://raw.githubusercontent.com/Abdlhince/Projects/master/102-kittens-carousel-static-website-alb-asg/static-web/"
+              curl -s --create-dirs -o "/var/www/html/index.html" -L "$FOLDER"index.html
+              curl -s --create-dirs -o "/var/www/html/cat0.jpg" -L "$FOLDER"cat0.jpg
+              curl -s --create-dirs -o "/var/www/html/cat1.jpg" -L "$FOLDER"cat1.jpg
+              curl -s --create-dirs -o "/var/www/html/cat2.jpg" -L "$FOLDER"cat2.jpg
+              systemctl start httpd
+              systemctl enable httpd 
+  WebServerASG:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AvailabilityZones:
+        !GetAZs ""
+      DesiredCapacity: 2
+      HealthCheckGracePeriod: 90
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServerLT
+        Version: !GetAtt WebServerLT.LatestVersionNumber
+      MaxSize: 3 #required
+      MinSize: 1 #required
+      TargetGroupARNs:
+        - !Ref WebServerTG
+Outputs:
+  WebsiteURL:
+    Description: Kittens Carousel Application Load Balancer URL
+    Value: !Sub 
+      - http://${ALBAddress}
+      - ALBAddress: !GetAtt ALB.DNSName        
